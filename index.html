@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Golden Lunchbox</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background-color: #FCF9F1; 
+            color: #451a03; 
+            -webkit-tap-highlight-color: transparent; 
+        }
+        .animate-fade { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .instruction-text { 
+            white-space: pre-line; 
+            word-wrap: break-word;
+        }
+        
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        img { object-fit: cover; width: 100%; height: 260px; border-radius: 2.5rem 2.5rem 0 0; background-color: #fef3c7; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- ICONS ---
+        const IconLunchbox = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="12" rx="4" /><path d="M7 8V6a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v2" /><line x1="3" y1="14" x2="21" y2="14" /></svg>;
+        const IconCheck = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>;
+        const IconBook = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>;
+        const IconSale = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="12" rx="4" /><path d="M7 8V6a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v2" /></svg>;
+        const IconTrash = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>;
+        const IconMapPin = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="inline-block mr-1"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('fridge');
+            const [inventory, setInventory] = useState([]);
+            const [newItem, setNewItem] = useState('');
+            const [recipes, setRecipes] = useState([]);
+            const [sales, setSales] = useState([]);
+            const [loading, setLoading] = useState(false);
+
+            // -----------------------------------------------------------------
+            // 📍 STEP 1: PASTE YOUR GOOGLE SHEET CSV LINKS HERE
+            // -----------------------------------------------------------------
+            const RECIPES_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4iXHyFAKYN3GNrZofAkI_GZOX2K20b5JKK3zb_EPO_PKIk1E1fw_5Wu894LP9qup1Bt-6Rq56oMAv/pub?gid=0&single=true&output=csv";
+            const SALES_RADAR_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4iXHyFAKYN3GNrZofAkI_GZOX2K20b5JKK3zb_EPO_PKIk1E1fw_5Wu894LP9qup1Bt-6Rq56oMAv/pub?gid=1391603013&single=true&output=csv";
+            // -----------------------------------------------------------------
+
+            const parseCSV = (text) => {
+                const rows = [];
+                let currentRow = [];
+                let currentField = '';
+                let inQuotes = false;
+                for (let i = 0; i < text.length; i++) {
+                    const char = text[i];
+                    const nextChar = text[i + 1];
+                    if (char === '"' && inQuotes && nextChar === '"') { currentField += '"'; i++; }
+                    else if (char === '"') { inQuotes = !inQuotes; }
+                    else if (char === ',' && !inQuotes) { currentRow.push(currentField.trim()); currentField = ''; }
+                    else if ((char === '\r' || char === '\n') && !inQuotes) {
+                        if (currentField || currentRow.length > 0) { currentRow.push(currentField.trim()); rows.push(currentRow); }
+                        currentRow = []; currentField = '';
+                        if (char === '\r' && nextChar === '\n') i++;
+                    } else { currentField += char; }
+                }
+                if (currentField || currentRow.length > 0) { currentRow.push(currentField.trim()); rows.push(currentRow); }
+                const headers = (rows[0] || []).map(h => h.trim().toLowerCase());
+                return rows.slice(1).map(row => headers.reduce((obj, header, i) => { obj[header] = row[i]; return obj; }, {}));
+            };
+
+            // Helper to find data even if columns are named slightly differently
+            const findColumn = (row, nicknames) => {
+                const keys = Object.keys(row);
+                const foundKey = keys.find(k => nicknames.includes(k.toLowerCase().trim()));
+                return foundKey ? row[foundKey] : "";
+            };
+
+            const fetchData = async () => {
+                setLoading(true);
+                try {
+                    const [resR, resS] = await Promise.all([
+                        fetch(RECIPES_URL),
+                        fetch(SALES_RADAR_URL)
+                    ]);
+                    const [textR, textS] = await Promise.all([resR.text(), resS.text()]);
+                    
+                    setRecipes(parseCSV(textR).map(r => ({
+                        title: findColumn(r, ['title', 'name', 'recipe']),
+                        info: findColumn(r, ['recipes', 'instructions', 'info', 'steps']),
+                        image: findColumn(r, ['image', 'photo', 'picture', 'img']),
+                        tags: (findColumn(r, ['tags', 'category', 'type']) || "Golden").split('|')
+                    })));
+
+                    setSales(parseCSV(textS).filter(s => String(findColumn(s, ['active', 'live'])).toUpperCase() === 'TRUE').map(s => ({
+                        item: findColumn(s, ['item name', 'item', 'deal', 'title']),
+                        location: findColumn(s, ['location', 'where', 'store', 'at']),
+                        tip: findColumn(s, ['tip', 'note', 'description']),
+                        image: findColumn(s, ['image', 'photo', 'picture'])
+                    })));
+                } catch (e) { 
+                    console.error("Connection Error:", e);
+                } finally { 
+                    setLoading(false); 
+                }
+            };
+
+            useEffect(() => {
+                const saved = localStorage.getItem('gl-inventory');
+                if (saved) setInventory(JSON.parse(saved));
+                fetchData();
+            }, []);
+
+            const addInv = () => {
+                if (!newItem.trim()) return;
+                const updated = [{ name: newItem, id: Date.now() }, ...inventory];
+                setInventory(updated);
+                localStorage.setItem('gl-inventory', JSON.stringify(updated));
+                setNewItem('');
+            };
+
+            const removeInv = (id) => {
+                const updated = inventory.filter(i => i.id !== id);
+                setInventory(updated);
+                localStorage.setItem('gl-inventory', JSON.stringify(updated));
+            };
+
+            return (
+                <div className="min-h-screen pb-40">
+                    <header className="bg-white border-b border-amber-100 p-8 sticky top-0 z-50 shadow-sm flex justify-between items-center">
+                        <div>
+                            <h1 className="text-2xl font-black text-amber-600 tracking-tighter uppercase leading-none flex items-center gap-2">
+                                <IconLunchbox /> THE GOLDEN LUNCHBOX
+                            </h1>
+                            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mt-2 italic leading-none">
+                                {loading ? "🔄 Syncing Radar..." : "✨ Content Live"}
+                            </p>
+                        </div>
+                        <button onClick={fetchData} className="bg-amber-500 text-white p-3 rounded-2xl shadow-lg ring-2 ring-white active:scale-95 transition-all">
+                            <IconCheck />
+                        </button>
+                    </header>
+
+                    <main className="max-w-2xl mx-auto p-5 space-y-10">
+                        {activeTab === 'fridge' && (
+                            <div className="animate-fade space-y-8">
+                                <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-amber-100">
+                                    <label className="block text-[10px] font-black text-amber-700 uppercase mb-4 tracking-widest px-1 italic">Log Discovery</label>
+                                    <div className="flex flex-col gap-3">
+                                        <input 
+                                            className="w-full bg-neutral-50 rounded-2xl px-6 py-5 text-base font-bold outline-none border-2 border-transparent focus:border-amber-200"
+                                            placeholder="What's expiring? (e.g. 2 Yams)"
+                                            value={newItem} onChange={e => setNewItem(e.target.value)}
+                                            onKeyPress={e => e.key === 'Enter' && addInv()}
+                                        />
+                                        <button onClick={addInv} className="bg-amber-500 text-white font-black py-5 rounded-2xl shadow-lg uppercase text-xs tracking-widest">Log Item</button>
+                                    </div>
+                                </div>
+                                <div className="grid gap-3">
+                                    {inventory.map(item => (
+                                        <div key={item.id} className="bg-white p-6 rounded-[2.5rem] flex items-center justify-between border border-amber-50 shadow-sm animate-fade">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-1.5 h-10 rounded-full bg-amber-400"></div>
+                                                <p className="font-black text-neutral-800 text-lg">{item.name}</p>
+                                            </div>
+                                            <button onClick={() => removeInv(item.id)} className="p-2 text-neutral-200 hover:text-red-500 transition-colors">
+                                                <IconTrash />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'recipes' && (
+                            <div className="animate-fade space-y-10">
+                                {recipes.length > 0 ? recipes.map((r, i) => (
+                                    <div key={i} className="bg-white rounded-[4rem] border border-amber-50 shadow-sm overflow-hidden group hover:shadow-xl transition-all">
+                                        {r.image && <img src={r.image} alt={r.title} onerror="this.style.display='none'"/>}
+                                        <div className="p-10">
+                                            <div className="flex gap-2 mb-4">
+                                                {r.tags.map(t => <span key={t} className="text-[9px] bg-amber-50 text-amber-600 px-3 py-1 rounded-full font-black uppercase tracking-widest">{t}</span>)}
+                                            </div>
+                                            <h3 className="font-black text-3xl text-neutral-800 leading-tight mb-8 group-hover:text-amber-500 transition-colors">{r.title}</h3>
+                                            <div className="bg-amber-50/30 p-10 rounded-[2.5rem] border border-amber-50 shadow-inner">
+                                                <p className="instruction-text text-neutral-600 text-lg leading-relaxed italic font-medium">
+                                                    "{r.info}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )) : <p className="text-center text-amber-200 font-bold py-20 uppercase tracking-widest italic">No recipes found yet...</p>}
+                            </div>
+                        )}
+
+                        {activeTab === 'sales' && (
+                            <div className="animate-fade space-y-10">
+                                <div className="bg-amber-500 p-10 rounded-[4rem] text-white shadow-2xl relative overflow-hidden text-center">
+                                    <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none">Sale Radar</h2>
+                                    <p className="text-amber-100 text-[10px] font-black uppercase tracking-widest mt-2">Active Neighborhood Deals</p>
+                                </div>
+                                {sales.length > 0 ? sales.map((s, i) => (
+                                    <div key={i} className="bg-white rounded-[3.5rem] border border-amber-50 shadow-sm overflow-hidden flex flex-col group animate-fade">
+                                        {s.image && <img src={s.image} alt={s.item} onerror="this.style.display='none'"/>}
+                                        <div className="p-10">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">In Stock</span>
+                                                {s.location && <span className="text-[10px] font-black text-amber-400 uppercase italic flex items-center"><IconMapPin /> {s.location}</span>}
+                                            </div>
+                                            <h3 className="text-3xl font-black uppercase tracking-tighter text-neutral-800 leading-none">{s.item}</h3>
+                                            <p className="instruction-text text-neutral-500 text-base mt-6 pt-6 border-t border-amber-50 font-medium leading-relaxed italic">"{s.tip}"</p>
+                                        </div>
+                                    </div>
+                                )) : <p className="text-center text-amber-200 font-bold py-20 uppercase tracking-widest italic">Searching for deals...</p>}
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-2xl border border-amber-100 p-3 flex gap-4 rounded-[3rem] shadow-2xl z-[100] ring-8 ring-amber-500/5">
+                        <button onClick={() => setActiveTab('fridge')} className={`flex items-center gap-3 px-8 py-5 rounded-[2.2rem] transition-all duration-300 ${activeTab === 'fridge' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300'}`}>
+                            <IconCheck /><span className="font-black text-[10px] tracking-widest uppercase">Rescue</span>
+                        </button>
+                        <button onClick={() => setActiveTab('recipes')} className={`flex items-center gap-3 px-8 py-4 rounded-[2.2rem] transition-all duration-300 ${activeTab === 'recipes' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300'}`}>
+                            <IconBook /><span className="font-black text-[10px] tracking-widest uppercase font-black leading-none">Library</span>
+                        </button>
+                        <button onClick={() => setActiveTab('sales')} className={`flex items-center gap-3 px-8 py-4 rounded-[2.2rem] transition-all duration-300 ${activeTab === 'sales' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300'}`}>
+                            <IconSale /><span className="font-black text-[10px] tracking-widest uppercase">Sales</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
