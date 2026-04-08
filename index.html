@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Golden Lunchbox</title>
+    <!-- Tailwind for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & Babel for the app logic -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'the-golden-lunchbox';
+
+        // Attach to window so React can find them
+        window.fb = { db, auth, collection, addDoc, onSnapshot, query, serverTimestamp, signInAnonymously, onAuthStateChanged, appId };
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #FCF9F1; color: #451a03; -webkit-tap-highlight-color: transparent; }
+        .animate-fade { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const IconLunchbox = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="8" width="18" height="12" rx="4" /><path d="M7 8V6a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v2" /><line x1="3" y1="14" x2="21" y2="14" /></svg>
+        );
+        const IconCheck = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+        );
+        const IconBook = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        );
+        const IconTrash = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        );
+        const IconMapPin = () => (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="inline-block mr-1"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        );
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('fridge');
+            const [inventory, setInventory] = useState([]);
+            const [newItemName, setNewItemName] = useState('');
+            const [recipes, setRecipes] = useState([]);
+            const [sheetSales, setSheetSales] = useState([]);
+            const [communitySales, setCommunitySales] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [status, setStatus] = useState({ message: '', type: '' });
+            const [user, setUser] = useState(null);
+            
+            const [showDealForm, setShowDealForm] = useState(false);
+            const [newDeal, setNewDeal] = useState({ item: '', location: '', tip: '' });
+            const [isSaving, setIsSaving] = useState(false);
+
+            const RECIPES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4iXHyFAKYN3GNrZofAkI_GZOX2K20b5JKK3zb_EPO_PKIk1E1fw_5Wu894LP9qup1Bt-6Rq56oMAv/pub?gid=0&single=true&output=csv";
+            const SALES_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4iXHyFAKYN3GNrZofAkI_GZOX2K20b5JKK3zb_EPO_PKIk1E1fw_5Wu894LP9qup1Bt-6Rq56oMAv/pub?gid=1391603013&single=true&output=csv";
+
+            const parseCSV = (text) => {
+                const rows = [];
+                let currentRow = [];
+                let currentField = '';
+                let inQuotes = false;
+                for (let i = 0; i < text.length; i++) {
+                    const char = text[i];
+                    const nextChar = text[i + 1];
+                    if (char === '"' && inQuotes && nextChar === '"') { currentField += '"'; i++; }
+                    else if (char === '"') { inQuotes = !inQuotes; }
+                    else if (char === ',' && !inQuotes) { currentRow.push(currentField.trim()); currentField = ''; }
+                    else if ((char === '\r' || char === '\n') && !inQuotes) {
+                        if (currentField || currentRow.length > 0) { currentRow.push(currentField.trim()); rows.push(currentRow); }
+                        currentRow = []; currentField = '';
+                        if (char === '\r' && nextChar === '\n') i++;
+                    } else { currentField += char; }
+                }
+                if (currentField || currentRow.length > 0) { currentRow.push(currentField.trim()); rows.push(currentRow); }
+                const headers = (rows[0] || []).map(h => h.trim());
+                return rows.slice(1).map(row => headers.reduce((obj, header, i) => { obj[header] = row[i]; return obj; }, {}));
+            };
+
+            const smartFind = (row, names) => {
+                const key = Object.keys(row).find(k => names.includes(k.toLowerCase().trim()));
+                return key ? row[key] : "";
+            };
+
+            const fetchSheetData = async () => {
+                setLoading(true);
+                try {
+                    const [resR, resS] = await Promise.all([
+                        fetch(RECIPES_CSV),
+                        fetch(SALES_CSV)
+                    ]);
+                    const [textR, textS] = await Promise.all([resR.text(), resS.text()]);
+                    
+                    const recipesParsed = parseCSV(textR);
+                    const salesParsed = parseCSV(textS);
+
+                    setRecipes(recipesParsed.map(r => ({
+                        id: smartFind(r, ['id']) || Math.random(),
+                        title: smartFind(r, ['title', 'name']),
+                        tags: (smartFind(r, ['tags', 'category']) || "Golden").split('|').map(t => t.trim()),
+                        instructions: smartFind(r, ['recipes', 'instructions', 'method']),
+                        time: smartFind(r, ['efforts', 'time']),
+                        image: smartFind(r, ['image', 'photo', 'picture']),
+                        location: smartFind(r, ['location', 'where'])
+                    })));
+
+                    setSheetSales(salesParsed.filter(s => String(smartFind(s, ['active'])).toUpperCase() === 'TRUE').map(s => ({
+                        item: smartFind(s, ['item name', 'item', 'title']),
+                        status: smartFind(s, ['status', 'deal']) || 'Official Deal',
+                        tip: smartFind(s, ['tip', 'note', 'info']),
+                        location: smartFind(s, ['location', 'where', 'store']),
+                        image: smartFind(s, ['image', 'photo', 'picture']),
+                        id: smartFind(s, ['id']) || Math.random()
+                    })));
+                } catch (e) { 
+                    console.error("Sheet Error:", e);
+                } finally { setLoading(false); }
+            };
+
+            useEffect(() => {
+                const saved = localStorage.getItem('golden-lunchbox-inventory');
+                if (saved) setInventory(JSON.parse(saved));
+                fetchSheetData();
+
+                const interval = setInterval(() => {
+                    if (window.fb) {
+                        clearInterval(interval);
+                        const { auth, signInAnonymously, onAuthStateChanged, db, collection, query, onSnapshot, appId } = window.fb;
+                        
+                        onAuthStateChanged(auth, (u) => {
+                            if (u) {
+                                setUser(u);
+                                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'user_sales'));
+                                onSnapshot(q, (snapshot) => {
+                                    setCommunitySales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                                });
+                            } else {
+                                signInAnonymously(auth).catch(e => console.error("Auth Error", e));
+                            }
+                        });
+                    }
+                }, 500);
+            }, []);
+
+            const submitCommunityDeal = async () => {
+                if (!user) {
+                    setStatus({ message: 'Still connecting...', type: 'error' });
+                    return;
+                }
+                if (!newDeal.item || !newDeal.location) {
+                    setStatus({ message: 'Fill in Item and Location!', type: 'error' });
+                    return;
+                }
+
+                setIsSaving(true);
+                const { db, collection, addDoc, serverTimestamp, appId } = window.fb;
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'user_sales'), {
+                        item: newDeal.item,
+                        location: newDeal.location,
+                        tip: newDeal.tip,
+                        status: 'Community Spot',
+                        timestamp: serverTimestamp(),
+                        userId: user.uid
+                    });
+                    setNewDeal({ item: '', location: '', tip: '' });
+                    setShowDealForm(false);
+                    setStatus({ message: 'Success! Deal shared.', type: 'success' });
+                    setTimeout(() => setStatus({ message: '', type: '' }), 3000);
+                } catch (e) { 
+                    setStatus({ message: 'Failed to save deal.', type: 'error' });
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const addInventory = () => {
+                if (!newItemName.trim()) return;
+                const updated = [{ name: newItemName, id: Date.now() }, ...inventory];
+                setInventory(updated);
+                localStorage.setItem('golden-lunchbox-inventory', JSON.stringify(updated));
+                setNewItemName('');
+            };
+
+            return (
+                <div className="min-h-screen pb-32">
+                    <header className="bg-white border-b border-amber-200 sticky top-0 z-50 px-6 py-6 shadow-sm">
+                        <div className="max-w-2xl mx-auto flex justify-between items-center text-center px-4">
+                            <div>
+                                <h1 className="text-xl font-black text-amber-600 tracking-tighter uppercase leading-none">THE GOLDEN LUNCHBOX</h1>
+                                <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mt-1">
+                                    {user ? '✨ Community Active' : 'Connecting...'}
+                                </p>
+                            </div>
+                            <button onClick={fetchSheetData} className="bg-amber-500 text-white p-2 rounded-xl shadow-lg active:scale-90 transition-transform">
+                                <IconCheck />
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="max-w-2xl mx-auto p-5 space-y-8">
+                        {status.message && (
+                            <div className={`p-4 rounded-2xl text-[10px] font-black text-center uppercase tracking-widest animate-fade ${status.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {status.message}
+                            </div>
+                        )}
+
+                        {activeTab === 'fridge' && (
+                            <div className="space-y-6 animate-fade">
+                                <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-amber-100">
+                                    <label className="block text-[10px] font-black text-amber-700 uppercase mb-4 tracking-widest px-1 italic">Log Fridge Discovery</label>
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <input 
+                                            type="text" placeholder="e.g. Squash"
+                                            className="flex-1 bg-neutral-50 rounded-2xl px-6 py-4 text-sm font-bold border-2 border-amber-100 outline-none focus:border-amber-500"
+                                            value={newItemName} onChange={e => setNewItemName(e.target.value)}
+                                            onKeyPress={e => e.key === 'Enter' && addInventory()}
+                                        />
+                                        <button onClick={addInventory} className="bg-amber-500 text-white font-black py-4 px-8 rounded-2xl shadow-lg uppercase text-[11px] tracking-widest">Log</button>
+                                    </div>
+                                </div>
+                                <div className="grid gap-3">
+                                    {inventory.map(item => (
+                                        <div key={item.id} className="bg-white p-5 rounded-[2.2rem] flex items-center justify-between border border-amber-50">
+                                            <div className="flex items-center gap-4"><div className="w-1.5 h-10 rounded-full bg-amber-400"></div><p className="font-black text-neutral-800 text-base">{item.name}</p></div>
+                                            <button onClick={() => {
+                                                const filtered = inventory.filter(i => i.id !== item.id);
+                                                setInventory(filtered);
+                                                localStorage.setItem('golden-lunchbox-inventory', JSON.stringify(filtered));
+                                            }} className="p-2.5 text-neutral-300 hover:text-red-500"><IconTrash /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'recipes' && (
+                            <div className="space-y-6 animate-fade">
+                                {recipes.map(recipe => (
+                                    <div key={recipe.id} className="bg-white rounded-[3rem] border border-amber-50 shadow-sm overflow-hidden group">
+                                        {recipe.image && <img src={recipe.image} className="w-full h-56 object-cover" />}
+                                        <div className="p-8">
+                                            <div className="flex gap-2 mb-4 items-center justify-between">
+                                                <div className="flex gap-2">{recipe.tags.map(tag => <span key={tag} className="text-[9px] bg-amber-50 text-amber-600 px-3 py-1 rounded-full font-black uppercase">{tag}</span>)}</div>
+                                                {recipe.location && <p className="text-[10px] font-black text-amber-400 uppercase italic"><IconMapPin /> {recipe.location}</p>}
+                                            </div>
+                                            <h3 className="font-black text-xl text-neutral-800 leading-tight">{recipe.title}</h3>
+                                            <p className="text-neutral-500 text-sm mt-4 italic leading-relaxed font-medium">"{recipe.instructions}"</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'sales' && (
+                            <div className="space-y-6 animate-fade">
+                                <div className="bg-amber-500 p-8 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden flex flex-col items-center">
+                                    <h2 className="text-3xl font-black italic tracking-tighter uppercase leading-none mb-4">Sale Radar</h2>
+                                    <button 
+                                        onClick={() => setShowDealForm(!showDealForm)}
+                                        className="bg-white text-amber-500 px-6 py-3 rounded-2xl font-black text-xs shadow-lg uppercase tracking-widest active:scale-95 transition-all"
+                                    >
+                                        {showDealForm ? 'Cancel' : 'Log a Spot'}
+                                    </button>
+                                </div>
+
+                                {showDealForm && (
+                                    <div className="bg-amber-50 p-8 rounded-[2.5rem] border-2 border-amber-200 shadow-inner space-y-4">
+                                        <input 
+                                            type="text" placeholder="Item (e.g. Yams)" 
+                                            className="w-full bg-white rounded-xl px-4 py-3 text-sm font-bold border-2 border-amber-100 outline-none focus:border-amber-500"
+                                            value={newDeal.item} onChange={e => setNewDeal({...newDeal, item: e.target.value})}
+                                        />
+                                        <input 
+                                            type="text" placeholder="Location (e.g. Market)" 
+                                            className="w-full bg-white rounded-xl px-4 py-3 text-sm font-bold border-2 border-amber-100 outline-none focus:border-amber-500"
+                                            value={newDeal.location} onChange={e => setNewDeal({...newDeal, location: e.target.value})}
+                                        />
+                                        <textarea 
+                                            placeholder="Note (e.g. 2 for 1)" 
+                                            className="w-full bg-white rounded-xl px-4 py-3 text-sm font-bold border-2 border-amber-100 outline-none h-20 focus:border-amber-500"
+                                            value={newDeal.tip} onChange={e => setNewDeal({...newDeal, tip: e.target.value})}
+                                        />
+                                        <button 
+                                            onClick={submitCommunityDeal}
+                                            disabled={isSaving}
+                                            className={`w-full text-white font-black py-4 rounded-xl shadow-lg uppercase text-xs tracking-widest transition-all ${isSaving ? 'bg-amber-300' : 'bg-amber-500 hover:bg-amber-600'}`}
+                                        >
+                                            {isSaving ? 'Posting...' : 'Post to Community'}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {sheetSales.map(sale => (
+                                    <div key={sale.id} className="bg-white rounded-[2.5rem] border-2 border-amber-100 shadow-sm overflow-hidden flex flex-col">
+                                        {sale.image && <img src={sale.image} className="w-full h-56 object-cover" />}
+                                        <div className="p-8">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="text-amber-600 text-[10px] font-black uppercase tracking-widest">OFFICIAL DEAL</p>
+                                                {sale.location && <p className="text-[10px] font-black text-amber-400 uppercase italic"><IconMapPin /> {sale.location}</p>}
+                                            </div>
+                                            <h3 className="text-2xl font-black uppercase tracking-tighter text-neutral-800 leading-tight">{sale.item}</h3>
+                                            <p className="text-neutral-500 text-sm italic mt-2 font-medium">"{sale.tip}"</p>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {communitySales.map(sale => (
+                                    <div key={sale.id} className="bg-white/60 rounded-[2.5rem] border border-dashed border-amber-200 p-8 flex flex-col animate-fade">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <p className="text-amber-400 text-[10px] font-black uppercase tracking-widest">COMMUNITY SPOT</p>
+                                            {sale.location && <p className="text-[10px] font-black text-amber-300 uppercase italic"><IconMapPin /> {sale.location}</p>}
+                                        </div>
+                                        <h3 className="text-xl font-black uppercase tracking-tighter text-neutral-700">{sale.item}</h3>
+                                        <p className="text-neutral-400 text-xs italic mt-2 font-medium">"{sale.tip}"</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-2xl border border-amber-100 p-3 flex gap-2 rounded-[2.8rem] shadow-2xl z-[100] ring-8 ring-amber-500/5">
+                        <button onClick={() => setActiveTab('fridge')} className={`flex items-center gap-3 px-8 py-4 rounded-[2rem] transition-all duration-300 ${activeTab === 'fridge' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300 hover:text-amber-500'}`}>
+                            <IconCheck />{activeTab === 'fridge' && <span className="font-black text-[10px] tracking-widest uppercase">Rescue</span>}
+                        </button>
+                        <button onClick={() => setActiveTab('recipes')} className={`flex items-center gap-3 px-8 py-4 rounded-[2rem] transition-all duration-300 ${activeTab === 'recipes' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300 hover:text-amber-500'}`}>
+                            <IconBook />{activeTab === 'recipes' && <span className="font-black text-[10px] tracking-widest uppercase">Library</span>}
+                        </button>
+                        <button onClick={() => setActiveTab('sales')} className={`flex items-center gap-3 px-8 py-4 rounded-[2rem] transition-all duration-300 ${activeTab === 'sales' ? 'bg-amber-500 text-white shadow-xl scale-105' : 'text-amber-300 hover:text-amber-500'}`}>
+                            <IconLunchbox />{activeTab === 'sales' && <span className="font-black text-[10px] tracking-widest uppercase font-black">Sales</span>}
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
